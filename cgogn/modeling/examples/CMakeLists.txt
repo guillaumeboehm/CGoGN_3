@@ -11,6 +11,16 @@ find_package(cgogn_rendering REQUIRED)
 
 set(CGOGN_TEST_PREFIX "test_")
 
+add_executable(project project.cpp)
+target_link_libraries(project
+	cgogn::core
+	cgogn::ui
+	cgogn::io
+	cgogn::rendering
+	cgogn::modeling
+	${CMAKE_DL_LIBS}
+)
+
 add_executable(modeling modeling.cpp)
 target_link_libraries(modeling
 	cgogn::core

@@ -1,0 +1,8 @@
+build
+CMakeFiles
+Makefile
+*.cmake
+CMakeCache
+*.pc
+*_export.h
+.vscode

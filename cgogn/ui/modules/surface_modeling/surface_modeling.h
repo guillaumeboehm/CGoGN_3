@@ -34,6 +34,7 @@
 
 #include <cgogn/modeling/algos/subdivision.h>
 #include <cgogn/modeling/algos/decimation/decimation.h>
+#include <cgogn/modeling/algos/simplification/topstoc.h>
 
 namespace cgogn
 {
@@ -72,6 +73,13 @@ public:
 	void decimate_mesh(MESH& m, Attribute<Vec3>* vertex_position)
 	{
 		modeling::decimate(m, vertex_position, 0.1 * mesh_provider_->mesh_data(&m)->template nb_cells<Vertex>());
+		mesh_provider_->emit_connectivity_changed(&m);
+		mesh_provider_->emit_attribute_changed(&m, vertex_position);
+	}
+
+	void simplify_mesh(MESH& m, Attribute<Vec3>* vertex_position)
+	{
+		modeling::topstoc(m, vertex_position);
 		mesh_provider_->emit_connectivity_changed(&m);
 		mesh_provider_->emit_attribute_changed(&m, vertex_position);
 	}
@@ -131,6 +139,8 @@ protected:
 					subdivide_mesh(*selected_mesh_, selected_vertex_position_.get());
 				if (ImGui::Button("Decimate"))
 					decimate_mesh(*selected_mesh_, selected_vertex_position_.get());
+				if (ImGui::Button("Simplify"))
+					simplify_mesh(*selected_mesh_, selected_vertex_position_.get());
 			}
 		}
 		
