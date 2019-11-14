@@ -97,11 +97,11 @@ public:
 			
 			std::string ext = extension(filename);
 			bool imported;
-			if(ext.compare("cg") == 0)
+			if (ext.compare("cg") == 0)
 				imported = cgogn::io::import_CG(*m, filename);
-			else if(ext.compare("cgr") == 0)
+			else if (ext.compare("cgr") == 0)
 				imported = cgogn::io::import_CGR(*m, filename);
-			else if(ext.compare("skel") == 0)
+			else if (ext.compare("skel") == 0)
 				imported = cgogn::io::import_SKEL(*m, filename);
 			else
 				imported = false;
@@ -259,6 +259,8 @@ public:
 	using attribute_changed_t = struct attribute_changed_t_(*)(Attribute<T>* attribute);
 	using attribute_changed = struct attribute_changed_(*)(AttributeGen* attribute);
 	using connectivity_changed = struct connectivity_changed_(*)();
+	template <typename CELL>
+	using cells_set_changed = struct cells_set_changed_(*)(CellsSet<MESH, CELL>* set);
 
 	template <typename T>
 	void emit_attribute_changed(const MESH* m, Attribute<T>* attribute)
@@ -287,6 +289,12 @@ public:
 		md->set_primitives_dirty(rendering::TRIANGLES);
 
 		boost::synapse::emit<connectivity_changed>(m);
+	}
+
+	template <typename CELL>
+	void emit_cells_set_changed(const MESH* m, CellsSet<MESH, CELL>* set)
+	{
+		boost::synapse::emit<cells_set_changed<CELL>>(m, set);
 	}
 
 protected:

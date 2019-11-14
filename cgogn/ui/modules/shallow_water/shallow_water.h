@@ -1,6 +1,6 @@
 /*******************************************************************************
-* CGoGN: Combinatorial and Geometric modeling with Generic N-dimensional Maps  *
-* Copyright (C) 2015, IGG Group, ICube, University of Strasbourg, France       *
+* CGoGN                                                                        *
+* Copyright (C) 2019, IGG Group, ICube, University of Strasbourg, France       *
 *                                                                              *
 * This library is free software; you can redistribute it and/or modify it      *
 * under the terms of the GNU Lesser General Public License as published by the *
@@ -21,45 +21,62 @@
 *                                                                              *
 *******************************************************************************/
 
-#include <cgogn/io/graph/graph_import.h>
+#ifndef CGOGN_MODULE_SHALLOW_WATER_H_
+#define CGOGN_MODULE_SHALLOW_WATER_H_
 
-#include <cgogn/core/types/mesh_traits.h>
-#include <cgogn/core/functions/attributes.h>
-#include <cgogn/core/functions/mesh_ops/vertex.h>
-
-#include <vector>
+#include <cgogn/ui/module.h>
 
 namespace cgogn
 {
 
-namespace io
+namespace ui
 {
 
-void import_graph_data(Graph& g, const GraphImportData& graph_data)
+template <typename MESH>
+class ShallowWater : public ViewModule
 {
-	using Vertex = Graph::Vertex;
+    template <typename T>
+    using Attribute = typename mesh_traits<MESH>::template Attribute<T>;
 
-	auto vertex_dart = add_attribute<Dart, Vertex>(g, "__vertex_dart");
+    using Vertex = typename mesh_traits<MESH>::Vertex;
+    using Edge = typename mesh_traits<MESH>::Edge;
+    using Face = typename mesh_traits<MESH>::Face;
 
-	for (uint32 vertex_id : graph_data.vertices_id_)
+    using Vec3 = geometry::Vec3;
+    using Scalar = geometry::Scalar;
+
+public:
+
+	ShallowWater(const App& app) :
+		ViewModule(app, "ShallowWater (" + std::string{mesh_traits<MESH>::name} + ")")
+	{}
+	~ShallowWater()
+	{}
+
+protected:
+
+	void init() override
 	{
-		Vertex v = add_vertex(g, false);
-		set_index(g, v, vertex_id);
-		(*vertex_dart)[vertex_id] = v.dart;
+		mesh_provider_ = static_cast<ui::MeshProvider<MESH>*>(app_.module("MeshProvider (" + std::string{mesh_traits<MESH>::name} + ")"));
 	}
 
-	for (uint32 i = 0; i < graph_data.edges_vertex_indices_.size(); i += 2)
+    void interface() override
 	{
-		connect_vertices(
-			g,
-			Vertex((*vertex_dart)[graph_data.edges_vertex_indices_[i]]),
-			Vertex((*vertex_dart)[graph_data.edges_vertex_indices_[i+1]])
-		);
+		ImGui::Begin(name_.c_str(), nullptr, ImGuiWindowFlags_NoSavedSettings);
+		ImGui::SetWindowSize({0, 0});
+
+
+		
+		ImGui::End();
 	}
 
-	remove_attribute<Vertex>(g, vertex_dart);
-}
+private:
 
-} // namespace io
+	MeshProvider<MESH>* mesh_provider_;
+};
+
+} // namespace ui
 
 } // namespace cgogn
+
+#endif // CGOGN_MODULE_SHALLOW_WATER_H_

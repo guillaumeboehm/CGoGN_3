@@ -1,6 +1,6 @@
 /*******************************************************************************
-* CGoGN: Combinatorial and Geometric modeling with Generic N-dimensional Maps  *
-* Copyright (C) 2015, IGG Group, ICube, University of Strasbourg, France       *
+* CGoGN                                                                        *
+* Copyright (C) 2019, IGG Group, ICube, University of Strasbourg, France       *
 *                                                                              *
 * This library is free software; you can redistribute it and/or modify it      *
 * under the terms of the GNU Lesser General Public License as published by the *
@@ -21,45 +21,37 @@
 *                                                                              *
 *******************************************************************************/
 
-#include <cgogn/io/graph/graph_import.h>
+#ifndef CGOGN_MODULE_SHALLOW_WATER_SOLVER_H_
+#define CGOGN_MODULE_SHALLOW_WATER_SOLVER_H_
 
-#include <cgogn/core/types/mesh_traits.h>
-#include <cgogn/core/functions/attributes.h>
-#include <cgogn/core/functions/mesh_ops/vertex.h>
-
-#include <vector>
+#include <cgogn/geometry/types/vector_traits.h>
 
 namespace cgogn
 {
 
-namespace io
+namespace ui
 {
 
-void import_graph_data(Graph& g, const GraphImportData& graph_data)
+using Scalar = geometry::Scalar;
+
+struct Str_Riemann_Flux
 {
-	using Vertex = Graph::Vertex;
+    Scalar F1;  /**< Flux de masse à travers l'interface **/
+    Scalar F2;  /**< Flux de quantité de mouvement à travers l'interface dans la direction normale à l'interface **/
+    Scalar F3;  /**< Flux de quantité de mouvement à travers l'interface dans la direction longitudinale à l'interface **/
+    Scalar s2L; /**< Quantité de mouvement associée well-balancing du terme source pour la maille gauche de l'interface **/
+    Scalar s2R; /**< Quantité de mouvement associée well-balancing du terme source pour la maille droite de l'interface **/
+};
 
-	auto vertex_dart = add_attribute<Dart, Vertex>(g, "__vertex_dart");
+Str_Riemann_Flux Solv_HLLC(
+    Scalar g, Scalar hmin, Scalar smalll,
+    Scalar zbL, Scalar zbR,
+    Scalar PhiL, Scalar PhiR,
+    Scalar hL, Scalar qL, Scalar rL, Scalar hR, Scalar qR, Scalar rR
+);
 
-	for (uint32 vertex_id : graph_data.vertices_id_)
-	{
-		Vertex v = add_vertex(g, false);
-		set_index(g, v, vertex_id);
-		(*vertex_dart)[vertex_id] = v.dart;
-	}
-
-	for (uint32 i = 0; i < graph_data.edges_vertex_indices_.size(); i += 2)
-	{
-		connect_vertices(
-			g,
-			Vertex((*vertex_dart)[graph_data.edges_vertex_indices_[i]]),
-			Vertex((*vertex_dart)[graph_data.edges_vertex_indices_[i+1]])
-		);
-	}
-
-	remove_attribute<Vertex>(g, vertex_dart);
-}
-
-} // namespace io
+} // namespace ui
 
 } // namespace cgogn
+
+#endif // CGOGN_MODULE_SHALLOW_WATER_SOLVER_H_
