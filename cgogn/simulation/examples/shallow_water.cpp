@@ -28,11 +28,9 @@
 #include <cgogn/ui/view.h>
 
 #include <cgogn/ui/modules/mesh_provider/mesh_provider.h>
-#include <cgogn/ui/modules/surface_differential_properties/surface_differential_properties.h>
 #include <cgogn/ui/modules/surface_render/surface_render.h>
 #include <cgogn/ui/modules/surface_render_vector/surface_render_vector.h>
-#include <cgogn/ui/modules/surface_modeling/surface_modeling.h>
-#include <cgogn/ui/modules/surface_selection/surface_selection.h>
+#include <cgogn/ui/modules/shallow_water/shallow_water.h>
 
 #define DEFAULT_MESH_PATH CGOGN_STR(CGOGN_DATA_PATH)"/meshes/"
 
@@ -49,49 +47,24 @@ using Scalar = cgogn::geometry::Scalar;
 
 int main(int argc, char** argv)
 {
-	std::string filename;
-	if (argc < 2)
-		filename = std::string(DEFAULT_MESH_PATH) + std::string("off/socket.off");
-	else
-		filename = std::string(argv[1]);
-
 	cgogn::thread_start();
 
 	cgogn::ui::App app;
-	app.set_window_title("Subdivision");
+	app.set_window_title("Shallow water");
 	app.set_window_size(1000, 800);
 
 	cgogn::ui::MeshProvider<Mesh> mp(app);
 	cgogn::ui::SurfaceRender<Mesh> sr(app);
 	cgogn::ui::SurfaceRenderVector<Mesh> srv(app);
-	cgogn::ui::SurfaceDifferentialProperties<Mesh> sdp(app);
-	cgogn::ui::SurfaceModeling<Mesh> sm(app);
-	cgogn::ui::SurfaceSelection<Mesh> ss(app);
-
-	app.init_modules();
+	cgogn::ui::ShallowWater<Mesh> sw(app);
 
 	cgogn::ui::View* v1 = app.current_view();
 	v1->link_module(&mp);
 	v1->link_module(&sr);
 	v1->link_module(&srv);
-	v1->link_module(&ss);
+	v1->link_module(&sw);
 
-	Mesh* m = mp.load_surface_from_file(filename);
-	if (!m)
-	{
-		std::cout << "File could not be loaded" << std::endl;
-		return 1;
-	}
-
-	std::shared_ptr<Attribute<Vec3>> vertex_position = cgogn::get_attribute<Vec3, Vertex>(*m, "position");
-	std::shared_ptr<Attribute<Vec3>> vertex_normal = cgogn::add_attribute<Vec3, Vertex>(*m, "normal");
-
-	mp.set_mesh_bb_vertex_position(m, vertex_position);
-
-	sdp.compute_normal(*m, vertex_position.get(), vertex_normal.get());
-	
-	sr.set_vertex_position(*m, vertex_position);
-	sr.set_vertex_normal(*m, vertex_normal);
+	app.init_modules();
 
 	return app.launch();
 }
