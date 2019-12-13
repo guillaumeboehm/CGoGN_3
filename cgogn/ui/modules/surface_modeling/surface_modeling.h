@@ -79,7 +79,7 @@ public:
 
 	void simplify_mesh(MESH& m, Attribute<Vec3>* vertex_position)
 	{
-		modeling::topstoc(m, vertex_position);
+		modeling::topstoc(mesh_provider_, m, vertex_position, 0.9 * mesh_provider_->mesh_data(&m)->template nb_cells<Vertex>());
 		mesh_provider_->emit_connectivity_changed(&m);
 		mesh_provider_->emit_attribute_changed(&m, vertex_position);
 	}
