@@ -47,14 +47,29 @@ namespace modeling
 
 using Vec3 = geometry::Vec3;
 
+// template <typename MESH>
+// void topstoc_vertex_selection(MESH &m, CellCache<MESH> &rg_chache, uint32 n)
+// {
+// 	uint32 s = nb_cells<typename cgogn::mesh_traits<MESH>::Vertex>(m);
+// 	uint32 i = 0;
+
+// 	foreach_cell(m, [&](typename cgogn::mesh_traits<MESH>::Vertex v) -> bool { 
+// 		if(i++ < s-11){
+// 			rg_chache.template add<typename cgogn::mesh_traits<MESH>::Vertex>(v);
+// 		}
+// 		return true;
+// 	});
+// }
+
 template <typename MESH>
 void topstoc_vertex_selection(MESH &m, CellCache<MESH> &rg_chache, uint32 n)
 {
 	uint32 s = nb_cells<typename cgogn::mesh_traits<MESH>::Vertex>(m);
 	uint32 i = 0;
 
-	foreach_cell(m, [&](typename cgogn::mesh_traits<MESH>::Vertex v) -> bool { 
-		if(i++ < s*0.95){
+	foreach_cell(m, [&](typename cgogn::mesh_traits<MESH>::Vertex v) -> bool {
+		if (i++ < s - 11)
+		{
 			rg_chache.template add<typename cgogn::mesh_traits<MESH>::Vertex>(v);
 		}
 		return true;
@@ -86,7 +101,7 @@ void compute_surface_data(const MESH &m, MESH &new_m,
 			uint32 id = new_index<typename cgogn::mesh_traits<MESH>::Vertex>(new_m);
 			(*position)[id] = value<Vec3>(m, vertex_position, v);
 			std::cerr << "from:" << m.index_of(v) << " to:" << id;
-			// if (value<uint32>(m, vertex_anchor, v) != m.index_of(v))
+			if (value<uint32>(m, vertex_anchor, v) != m.index_of(v))
 				std::cerr << " anchor: " << value<uint32>(m, vertex_anchor, v);
 			std::cerr << std::endl;
 			v_map.emplace(m.index_of(v), id);
@@ -104,15 +119,18 @@ void compute_surface_data(const MESH &m, MESH &new_m,
 			sd.faces_vertex_indices_.push_back(v_map[value<uint32>(m, vertex_anchor, iv[1])]);
 			sd.faces_vertex_indices_.push_back(v_map[value<uint32>(m, vertex_anchor, iv[2])]);
 
-			// if (value<uint32>(m, vertex_anchor, iv[0]) != m.index_of(iv[0]) ||
-			// 	value<uint32>(m, vertex_anchor, iv[1]) != m.index_of(iv[1]) ||
-			// 	value<uint32>(m, vertex_anchor, iv[2]) != m.index_of(iv[2]))
-			// 	std::cerr << "origin: " << m.index_of(iv[0]) << " "
-			// 			  << m.index_of(iv[1]) << " "
-			// 			  << m.index_of(iv[2])
-			// 			  << "   new: " << v_map[value<uint32>(m, vertex_anchor, iv[0])] << " "
-			// 			  << v_map[value<uint32>(m, vertex_anchor, iv[1])] << " "
-			// 			  << v_map[value<uint32>(m, vertex_anchor, iv[2])] << std::endl;
+			if (value<uint32>(m, vertex_anchor, iv[0]) != m.index_of(iv[0]) ||
+				value<uint32>(m, vertex_anchor, iv[1]) != m.index_of(iv[1]) ||
+				value<uint32>(m, vertex_anchor, iv[2]) != m.index_of(iv[2]))
+				std::cerr << "origin: "
+						  << m.index_of(iv[0]) << " "
+						  << m.index_of(iv[1]) << " "
+						  << m.index_of(iv[2]) << std::endl
+						  << "new:    "
+						  << value<uint32>(m, vertex_anchor, iv[0]) << " "
+						  << value<uint32>(m, vertex_anchor, iv[1]) << " "
+						  << value<uint32>(m, vertex_anchor, iv[2]) << std::endl
+						  << std::endl;
 		}
 		return true;
 	});
@@ -166,20 +184,21 @@ void topstoc(ui::MeshProvider<MESH> *mp, MESH &m, typename mesh_traits<MESH>::te
 				std::cout << "ON VERTEX : " << m.index_of(v) << std::endl;
 				//for each vertex in the one-ring
 				foreach_adjacent_vertex_through_edge(m, v, [&](Vertex v2) -> bool {
-					if(!cm_done.is_marked(v2) && !cm_selected.is_marked(v2))
+					if (!cm_done.is_marked(v2) && !cm_selected.is_marked(v2) && !cm_rg_todo.is_marked(v2))
 					{
 						//add to the rg_cache if the vertex is not marked
 						cm_rg_todo.mark(v2);
 						value<uint32>(m, vertex_anchor, v2) = value<uint32>(m, vertex_anchor, v);
 						std::cout << "anchor : Vertex:" << m.index_of(v2) << " Parent:" << m.index_of(v) << " anchor:" << value<uint32>(m, vertex_anchor, v2) << std::endl;
 					}
-					else{
+					else
+					{
 						std::cout << "pass : Vertex:" << m.index_of(v2) << " anchor:" << value<uint32>(m, vertex_anchor, v2) << std::endl;
 					}
 					return true;
 				});
-				//mark cell and anchor it
 				cm_done.mark(v);
+				cm_rg_todo.unmark(v);
 			}
 			return true;
 		});
