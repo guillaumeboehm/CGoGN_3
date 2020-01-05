@@ -39,6 +39,11 @@
 #include <cgogn/io/surface/surface_import.h>
 #include <cgogn/ui/modules/mesh_provider/mesh_provider.h>
 
+#include <ctime>
+#include <cstdlib>
+#include <fstream>
+#include <algorithm>
+
 namespace cgogn
 {
 
@@ -47,93 +52,259 @@ namespace modeling
 
 using Vec3 = geometry::Vec3;
 
-// template <typename MESH>
-// void topstoc_vertex_selection(MESH &m, CellCache<MESH> &rg_chache, uint32 n)
-// {
-// 	uint32 s = nb_cells<typename cgogn::mesh_traits<MESH>::Vertex>(m);
-// 	uint32 i = 0;
-
-// 	foreach_cell(m, [&](typename cgogn::mesh_traits<MESH>::Vertex v) -> bool { 
-// 		if(i++ < s-11){
-// 			rg_chache.template add<typename cgogn::mesh_traits<MESH>::Vertex>(v);
-// 		}
-// 		return true;
-// 	});
-// }
 
 template <typename MESH>
-void topstoc_vertex_selection(MESH &m, CellCache<MESH> &rg_chache, uint32 n)
-{
-	uint32 s = nb_cells<typename cgogn::mesh_traits<MESH>::Vertex>(m);
-	uint32 i = 0;
+void debug_off(MESH& _m){
+	using Face = typename cgogn::mesh_traits<MESH>::Face;
+	using Vertex = typename cgogn::mesh_traits<MESH>::Vertex;
+	typename mesh_traits<MESH>::template Attribute<Vec3>* position = get_attribute<Vec3, Vertex>(_m, "position").get();
+	typename mesh_traits<MESH>::template Attribute<float32>* charac = get_attribute<float32, Vertex>(_m, "charac").get();
 
-	foreach_cell(m, [&](typename cgogn::mesh_traits<MESH>::Vertex v) -> bool {
-		if (i++ < s - 11)
-		{
-			rg_chache.template add<typename cgogn::mesh_traits<MESH>::Vertex>(v);
-		}
+	std::ofstream file;
+	file.open("debug.off");
+	uint nb_vertices = 0;
+	foreach_cell(_m, [&](Vertex v) -> bool {
+		nb_vertices++;
 		return true;
 	});
+	uint nb_faces = 0;
+	foreach_cell(_m, [&](Face f) -> bool{
+		nb_faces++;
+		return true;
+	});
+	
+	file << "COFF" << std::endl << nb_vertices << " " << nb_faces << " 0" << std::endl;
+
+	std::unordered_map<uint32, Vertex> vertices;
+	foreach_cell(_m, [&](Vertex v) -> bool{
+		vertices[_m.index_of(v)] = v;
+	});
+
+	float32 mean_charac = 0;
+	float32 min_charac = value<float32>(_m, charac, vertices[0]);
+	float32 max_charac = value<float32>(_m, charac, vertices[0]);
+	for(int i=0; i<nb_vertices; ++i){
+		float32 c = value<float32>(_m, charac, vertices[i]);
+		if(c < min_charac)
+			min_charac = c;
+		if(c > max_charac)
+			max_charac = c;
+		mean_charac += c;
+	}
+	mean_charac/=nb_vertices;
+
+	for(int i=0; i<nb_vertices; ++i){
+		max_charac=1;
+		min_charac=0;
+		Vec3 pos = value<Vec3>(_m, position, vertices[i]);
+		float32 charac_value = value<float32>(_m, charac, vertices[i]);
+		uint grayscale = (255/(max_charac-min_charac))*(charac_value-min_charac);
+		file << pos.x() << " " << pos.y() << " " << pos.z() << " ";
+		file << grayscale << " " << grayscale << " " << grayscale << std::endl;
+	}
+
+	foreach_cell(_m, [&](Face f) -> bool {
+		std::vector<Vertex> iv = incident_vertices(_m, f);
+		file << "3 " << _m.index_of(iv[0]) << " " << _m.index_of(iv[1]) << " " << _m.index_of(iv[2]) << std::endl;
+		return true;
+	});
+
+	file.close();
+
+}
+
+template <typename MESH, typename Vertex>
+void vertex_selection(MESH &_m, CellMarkerStore<MESH, Vertex> &cm_selected, uint32 _nb_vertices_to_keep, float32 adapt_coef = 0.66)
+{
+	typename mesh_traits<MESH>::template Attribute<Vec3>* normal = get_attribute<Vec3, Vertex>(_m, "normal").get();
+	typename mesh_traits<MESH>::template Attribute<float32>* charac = add_attribute<float32, Vertex>(_m, "charac").get();
+
+	std::srand(std::time(nullptr));//init rand
+
+	float32 mean_charac_value = 0;
+	float32 max_charac_value = 0;
+	uint32 nb_cells = 0;
+	std::vector<Vertex> vertices;
+	//compute characteristic value
+	foreach_cell(_m, [&](Vertex v) -> bool
+	{
+		nb_cells++;
+		uint32 count=0;
+		float32 charac_value = 0;
+		foreach_adjacent_vertex_through_edge(_m, v, [&](Vertex v2) -> bool{
+			count++;
+
+			Vec3 nv = value<Vec3>(_m, normal, v);
+			Vec3 nv2 = value<Vec3>(_m, normal, v2);
+
+			float32 dist = acos(nv.x() * nv2.x() + nv.y() * nv2.y() + nv.z() * nv2.z());
+			charac_value = (1.0f - dist) / 2.0f;
+			return true;
+		});
+		charac_value /= (float)count;
+
+		if(max_charac_value < charac_value) max_charac_value = charac_value;
+		
+		mean_charac_value += charac_value;
+		value<float32>(_m, charac, v) = charac_value;
+		vertices.push_back(v);
+		return true;
+	});
+	mean_charac_value /= (float)nb_cells;
+
+	std::sort(vertices.begin(), vertices.end(), [&](Vertex v, Vertex v2) -> bool {
+		return value<float32>(_m, charac, v) > value<float32>(_m, charac, v2);
+	});
+	uint count = 0;
+
+	//stochastic vertex selection
+	foreach_cell(_m, [&](Vertex v) -> bool
+	{
+		float32 random_variable = std::rand()/(float)(RAND_MAX);
+
+		float32 distrib_func = (
+									1.0f + adapt_coef*
+									(
+										value<float32>(_m, charac, v)/mean_charac_value - 1.0f
+									)
+								)/max_charac_value;
+
+
+		if(count++ < _nb_vertices_to_keep){
+			cm_selected.mark(vertices.back());
+			vertices.pop_back();
+		}
+		// if(random_variable < distrib_func){
+		// 	cm_selected.mark(v);
+		// }
+
+		return true;
+	});
+
+	remove_attribute<Vertex>(_m, charac);
+}
+
+template <typename MESH, typename Vertex>
+void region_growth(MESH &_m, typename mesh_traits<MESH>::template Attribute<uint32> *_vertex_anchor, CellMarkerStore<MESH, Vertex> &cm_selected)
+{
+	//region growth cell cache
+	std::list<Vertex> rg_cache;
+
+	//*fill the rg cache
+	for(int id : cm_selected.marked_cells())
+	{
+		foreach_cell(_m, [&](Vertex v) -> bool
+		{
+			//if cell is selected
+			if(_m.index_of(v)==id)
+			{
+				//add to region growth list
+				rg_cache.push_back(v);
+				//set its anchor to its own index
+				value<uint32>(_m, _vertex_anchor, v) = id;
+				return true;
+			}
+			return true;
+		});
+	}
+
+	//*compute the region growth
+	//to ignore computed cells
+	CellMarker<MESH, Vertex> cm_done(_m);
+	//to ignore previously anchored cells
+	CellMarker<MESH, Vertex> cm_anchored(_m);
+	while(!rg_cache.empty())
+	{
+		if(!cm_done.is_marked(rg_cache.front()))
+		{
+			//for each vertex in the one-ring
+			foreach_adjacent_vertex_through_edge(_m, rg_cache.front(), [&](Vertex v) -> bool
+			{
+				if (!cm_selected.is_marked(v) && !cm_done.is_marked(v) && !cm_anchored.is_marked(v))
+				{
+					//push vertex to compute it
+					rg_cache.push_back(v);
+					//anchor the ring vertex to the current vertex anchor
+					value<uint32>(_m, _vertex_anchor, v) = value<uint32>(_m, _vertex_anchor, rg_cache.front());
+					cm_anchored.mark(v);
+				}
+				return true;
+			});
+			cm_done.mark(rg_cache.front());
+			//go to next vertex
+			rg_cache.pop_front();
+		}
+		else{//already computed
+			//go to next vertex
+			rg_cache.pop_front();
+		}
+	}
 }
 
 template <typename MESH, typename Vertex, typename Face>
-void compute_surface_data(const MESH &m, MESH &new_m,
-						  const typename mesh_traits<MESH>::template Attribute<Vec3> *vertex_position,
-						  const typename mesh_traits<MESH>::template Attribute<uint32> *vertex_anchor,
-						  const CellMarkerStore<MESH, Vertex> &cm_selected,
-						  const CellMarkerStore<MESH, Face> &cm_faces,
-						  cgogn::io::SurfaceImportData &sd)
+void compute_surface_data(MESH &_m, MESH &_new_m,
+						  typename mesh_traits<MESH>::template Attribute<Vec3> *_vertex_position,
+						  typename mesh_traits<MESH>::template Attribute<Vec3> *_new_vertex_position,
+						  typename mesh_traits<MESH>::template Attribute<uint32> *_vertex_anchor,
+						  CellMarkerStore<MESH, Vertex> &cm_selected)
 {
-	std::vector<uint32> vertices = cm_selected.marked_cells();
-	const uint32 nb_vertices = vertices.size();
-	std::vector<uint32> faces = cm_faces.marked_cells();
-	const uint32 nb_faces = faces.size();
+	cgogn::io::SurfaceImportData surface_data;
 
-	sd.reserve(nb_vertices, nb_faces);
-	auto position = add_attribute<geometry::Vec3, CMap2::Vertex>(new_m, "position");
-
-	// for storing the link between the prev vertices and the new ones
-	std::unordered_map<uint32, uint32> v_map;
-
-	//foreach cell of the prev mesh
-	foreach_cell(m, [&](Vertex v) -> bool {
-		if(cm_selected.is_marked(v)){ // if the vertex is to keep
-			uint32 id = new_index<typename cgogn::mesh_traits<MESH>::Vertex>(new_m);
-			(*position)[id] = value<Vec3>(m, vertex_position, v);
-			std::cerr << "from:" << m.index_of(v) << " to:" << id;
-			if (value<uint32>(m, vertex_anchor, v) != m.index_of(v))
-				std::cerr << " anchor: " << value<uint32>(m, vertex_anchor, v);
-			std::cerr << std::endl;
-			v_map.emplace(m.index_of(v), id);
-			sd.vertices_id_.push_back(id);
-		}
+	//compute the new face count
+	uint32 face_count = 0;
+	foreach_cell(_m, [&](Face f) -> bool
+	{
+		std::vector<Vertex> iv = incident_vertices(_m, f);
+		if (value<uint32>(_m, _vertex_anchor, iv[0]) != value<uint32>(_m, _vertex_anchor, iv[1])
+		 && value<uint32>(_m, _vertex_anchor, iv[0]) != value<uint32>(_m, _vertex_anchor, iv[2])
+		 && value<uint32>(_m, _vertex_anchor, iv[1]) != value<uint32>(_m, _vertex_anchor, iv[2]))
+			face_count++;
 		return true;
 	});
 
-	//foreach face of the prev mesh
-	foreach_cell(m, [&](Face f) -> bool {
-		if(cm_faces.is_marked(f)){// if the face is to keep
-			sd.faces_nb_vertices_.push_back(3);
-			std::vector<typename cgogn::mesh_traits<MESH>::Vertex> iv = incident_vertices(m, f);
-			sd.faces_vertex_indices_.push_back(v_map[value<uint32>(m, vertex_anchor, iv[0])]);
-			sd.faces_vertex_indices_.push_back(v_map[value<uint32>(m, vertex_anchor, iv[1])]);
-			sd.faces_vertex_indices_.push_back(v_map[value<uint32>(m, vertex_anchor, iv[2])]);
+	surface_data.reserve(cm_selected.marked_cells().size(), face_count);
 
-			if (value<uint32>(m, vertex_anchor, iv[0]) != m.index_of(iv[0]) ||
-				value<uint32>(m, vertex_anchor, iv[1]) != m.index_of(iv[1]) ||
-				value<uint32>(m, vertex_anchor, iv[2]) != m.index_of(iv[2]))
-				std::cerr << "origin: "
-						  << m.index_of(iv[0]) << " "
-						  << m.index_of(iv[1]) << " "
-						  << m.index_of(iv[2]) << std::endl
-						  << "new:    "
-						  << value<uint32>(m, vertex_anchor, iv[0]) << " "
-						  << value<uint32>(m, vertex_anchor, iv[1]) << " "
-						  << value<uint32>(m, vertex_anchor, iv[2]) << std::endl
-						  << std::endl;
-		}
+	//map to link the old mesh vertices to the new ones
+	std::unordered_map<uint32, uint32> vmap;
+
+	typename mesh_traits<MESH>::template Attribute<Vec3>* new_normal = add_attribute<Vec3, Vertex>(_new_m, "normal").get();
+	typename mesh_traits<MESH>::template Attribute<Vec3>* normal = get_attribute<Vec3, Vertex>(_m, "normal").get();
+	for (std::vector<uint32>::const_iterator it = cm_selected.marked_cells().begin();
+									   it != cm_selected.marked_cells().end();
+									   it++)
+	{
+		//add new indices to the new mesh
+		uint32 id = new_index<Vertex>(_new_m);
+		//reposition the new vertices
+		(*_new_vertex_position)[id] = (*_vertex_position)[*it];
+
+		//transfer normals
+		(*new_normal)[id] = (*normal)[*it];
+
+		//put in the map
+		vmap.emplace(*it, id);
+		//prepare for surface import
+		surface_data.vertices_id_.push_back(id);
+	}
+
+	//push faces for surface import
+	foreach_cell(_m, [&](Face f) -> bool
+	{
+		std::vector<Vertex> iv = incident_vertices(_m, f);
+		if (value<uint32>(_m, _vertex_anchor, iv[0]) != value<uint32>(_m, _vertex_anchor, iv[1])
+		 && value<uint32>(_m, _vertex_anchor, iv[0]) != value<uint32>(_m, _vertex_anchor, iv[2])
+		 && value<uint32>(_m, _vertex_anchor, iv[1]) != value<uint32>(_m, _vertex_anchor, iv[2]))
+		 {
+			 surface_data.faces_nb_vertices_.push_back(3);
+			 surface_data.faces_vertex_indices_.push_back(vmap[value<uint32>(_m, _vertex_anchor, iv[0])]);
+			 surface_data.faces_vertex_indices_.push_back(vmap[value<uint32>(_m, _vertex_anchor, iv[1])]);
+			 surface_data.faces_vertex_indices_.push_back(vmap[value<uint32>(_m, _vertex_anchor, iv[2])]);
+		 }
 		return true;
 	});
+
+	//computes the mesh
+	io::import_surface_data(_new_m, surface_data);
 }
 
 /////////////
@@ -147,120 +318,32 @@ void topstoc(ui::MeshProvider<MESH> *mp, MESH &m, typename mesh_traits<MESH>::te
 	using Edge = typename cgogn::mesh_traits<MESH>::Edge;
 	using Face = typename cgogn::mesh_traits<MESH>::Face;
 
-	CellCache<MESH> rg_cache(m); //region growth cache
-
-
-	//add vertex anchor attribute
-	auto vertex_anchor = add_attribute<uint32, Vertex>(m, "anchor");
-
-	//************ selection of vertices to keep
-	topstoc_vertex_selection(m, rg_cache, nb_vertices_to_keep);
-
-	//mark vertices with anchor selected vertex
-	CellMarker<MESH, Vertex> cm_done(m);
-	CellMarkerStore<MESH, Vertex> cm_selected(m);
-	CellMarkerStore<MESH, Vertex> cm_rg_todo(m);
-	CellMarkerStore<MESH, Face> cm_faces_to_keep(m);
-
-	//mark the first selected vertices in the rg_cache 
-	foreach_cell(rg_cache, [&](Vertex v) -> bool {
-		cm_selected.mark(v);
-		cm_rg_todo.mark(v);
-		//mark its own vertex anchor if the vertex is selected
-		value<uint32>(m, vertex_anchor, v) = m.index_of(v);
-		return true;
-	});
-
-
-	//************* region-growth
-	bool done = false;
-	while(!done){
-		done = true;
-		foreach_cell(m, [&](Vertex v) -> bool {
-			//if cell is not marked
-			if(cm_rg_todo.is_marked(v) && !cm_done.is_marked(v))
-			{
-				done = false;
-				std::cout << "ON VERTEX : " << m.index_of(v) << std::endl;
-				//for each vertex in the one-ring
-				foreach_adjacent_vertex_through_edge(m, v, [&](Vertex v2) -> bool {
-					if (!cm_done.is_marked(v2) && !cm_selected.is_marked(v2) && !cm_rg_todo.is_marked(v2))
-					{
-						//add to the rg_cache if the vertex is not marked
-						cm_rg_todo.mark(v2);
-						value<uint32>(m, vertex_anchor, v2) = value<uint32>(m, vertex_anchor, v);
-						std::cout << "anchor : Vertex:" << m.index_of(v2) << " Parent:" << m.index_of(v) << " anchor:" << value<uint32>(m, vertex_anchor, v2) << std::endl;
-					}
-					else
-					{
-						std::cout << "pass : Vertex:" << m.index_of(v2) << " anchor:" << value<uint32>(m, vertex_anchor, v2) << std::endl;
-					}
-					return true;
-				});
-				cm_done.mark(v);
-				cm_rg_todo.unmark(v);
-			}
-			return true;
-		});
-	}
-
-
-
-
-	////DEBUG
-	foreach_cell(m, [&](Vertex v) -> bool {
-		std::cout << "Vertex : " << m.index_of(v);
-		if(!cm_selected.is_marked(v))
-			std::cout << " not to keep";
-
-		if (m.index_of(v) != value<uint32>(m, vertex_anchor, v))
-			std::cout << " v:" << m.index_of(v) << " anchor:" << value<uint32>(m, vertex_anchor, v);
-		std::cout << std::endl;
-	});
-	////DEBUG
-
-
-
-
-
-	//store the faces to keep
-	foreach_cell(m, [&](Face f) -> bool {
-		std::vector<Vertex> iv = incident_vertices(m, f);
-
-		if(value<uint32>(m, vertex_anchor, iv[0]) != value<uint32>(m, vertex_anchor, iv[1])
-		&& value<uint32>(m, vertex_anchor, iv[0]) != value<uint32>(m, vertex_anchor, iv[2])
-		&& value<uint32>(m, vertex_anchor, iv[1]) != value<uint32>(m, vertex_anchor, iv[2]))
-			cm_faces_to_keep.mark(f);
-		return true;
-	});
-
-	//************ simplification
-	//create the new mesh that will be added to the mesh provider
+	//*new mesh creation
 	std::string name = "simplified_";
-	mp->foreach_mesh([&](MESH *_m, const std::string& _name) -> bool {
+	mp->foreach_mesh([&](MESH *_m, const std::string &_name) -> bool
+	{
 		if (_m == &m)
 			name += _name;
 		return true;
 	});
-
 	MESH* new_m = mp->add_mesh(name);
 
-	//setup surface_data
-	cgogn::io::SurfaceImportData surface_data;
-	compute_surface_data(m, *new_m, vertex_position, vertex_anchor.get(), cm_selected, cm_faces_to_keep, surface_data);
+	CellMarkerStore<MESH, Vertex> cm_selected(m);
 
-	//import surface data
-	io::import_surface_data(*new_m, surface_data);
+	//*vertex selection
+	vertex_selection(m, cm_selected, nb_vertices_to_keep);
 
-	std::shared_ptr<typename cgogn::mesh_traits<MESH>::template Attribute<Vec3>> new_vertex_position = cgogn::get_attribute<Vec3, Vertex>(*new_m, "position");
+	//*region growth
+	auto vertex_anchor = add_attribute<uint32, Vertex>(m, "anchor");
+	region_growth(m, vertex_anchor.get(), cm_selected);
 
-	if (new_vertex_position)
-		mp->set_mesh_bb_vertex_position(new_m, new_vertex_position);
+	//*surface data
+	auto new_vertex_position = add_attribute<geometry::Vec3, CMap2::Vertex>(*new_m, "position");
+	compute_surface_data<MESH, Vertex, Face>(m, *new_m, vertex_position, new_vertex_position.get(), vertex_anchor.get(), cm_selected);
 
-	// mp->emit_connectivity_changed(new_m);
-	// mp->emit_attribute_changed(new_m, new_vertex_position.get());
-
-	remove_attribute<Edge>(m, vertex_anchor);
+	//*finish and cleanup
+	mp->set_mesh_bb_vertex_position(new_m, new_vertex_position);
+	remove_attribute<Vertex>(m, vertex_anchor);
 }
 
 } // namespace modeling
